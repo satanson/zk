@@ -238,6 +238,7 @@ private:
 public:
     Watcher(){}
     explicit Watcher(ZooKeeper* zk):zookeeper(zk){}
+    virtual ~Watcher() {}
     ZooKeeper* getZooKeeper()const{
         return zookeeper;
     }

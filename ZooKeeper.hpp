@@ -233,152 +233,152 @@ struct WatchedEvent{
 };
 
 class Watcher{
-    private:
-        ZooKeeper *zookeeper;
-    public:
-        Watcher(){}
-        explicit Watcher(ZooKeeper* zk):zookeeper(zk){}
-        ZooKeeper* getZooKeeper()const{
-            return zookeeper;
-        }
-        void setZooKeeper(ZooKeeper *zk){   
-            zookeeper = zk;
-        }
-        virtual void process(const WatchedEvent& event){
-            LOGi("Events are processed by default watcher");
-        }
+private:
+    ZooKeeper *zookeeper;
+public:
+    Watcher(){}
+    explicit Watcher(ZooKeeper* zk):zookeeper(zk){}
+    ZooKeeper* getZooKeeper()const{
+        return zookeeper;
+    }
+    void setZooKeeper(ZooKeeper *zk){   
+        zookeeper = zk;
+    }
+    virtual void process(const WatchedEvent& event){
+        LOGi("Events are processed by default watcher");
+    }
 };
 
 class ZooKeeper{
-    public:
-        void watch_callback(const WatchedEvent& event){
-            LOGi("zk_watcher->process(event)");
-            zk_watcher->process(event);
+public:
+    void watch_callback(const WatchedEvent& event){
+        LOGi("zk_watcher->process(event)");
+        zk_watcher->process(event);
+    }
+
+private:
+    zhandle_t* zk_handle;
+    clientid_t zk_clientid;
+    shared_ptr<Watcher> zk_watcher;
+
+public:
+    typedef uint8_t byte_t;
+    typedef long long int64_t;
+    typedef void (*watch_fn)(zhandle_t*,int,int,const char*,void*);
+
+    ZooKeeper(string const& connStr,int recv_timeout,
+            shared_ptr<Watcher> watcher,int64_t sessionId,
+            string const& passwd, int flags){
+
+        zoo_set_debug_level(ZOO_LOG_LEVEL_ERROR);
+        zk_clientid.client_id=sessionId;
+
+        size_t passwd_len=sizeof(zk_clientid.passwd);
+        //cout<<"passwd_len="<<passwd_len<<endl;
+        //cout<<"passwd_size()"<<passwd.size()<<endl;
+        assert(passwd.size()==passwd_len);
+        std::copy(passwd.begin(),passwd.end(),zk_clientid.passwd);
+        //LOGi("passwd_len=%u",passwd_len);
+        //LOGi("passwd_size()=%u",passwd.size());
+
+        zk_handle = zookeeper_init(connStr.c_str(), watch_process, recv_timeout,
+                &zk_clientid, NULL, flags);
+        if (!zk_handle){
+            THROW(zerror(errno));
         }
+        zk_watcher=watcher;
+        zk_watcher->setZooKeeper(this);
+        zoo_set_context(zk_handle,this);
+        LOGi("Succeeded in connecting to ZK specified by %s",connStr.c_str());
+    }
 
-    private:
-        zhandle_t* zk_handle;
-        clientid_t zk_clientid;
-        shared_ptr<Watcher> zk_watcher;
+    ZooKeeper(string const& connStr, int recv_timeout, shared_ptr<Watcher> watcher,
+            int64_t sessionId, string const& passwd):
+        ZooKeeper(connStr,recv_timeout,watcher,sessionId,passwd, 0){}
 
-    public:
-        typedef uint8_t byte_t;
-        typedef long long int64_t;
-        typedef void (*watch_fn)(zhandle_t*,int,int,const char*,void*);
+    ZooKeeper(string const& connStr, int recv_timeout, shared_ptr<Watcher> watcher, int flags):
+        ZooKeeper(connStr,recv_timeout,watcher,0,string(16,'0'), 0){}
 
-        ZooKeeper(string const& connStr,int recv_timeout,
-                shared_ptr<Watcher> watcher,int64_t sessionId,
-                string const& passwd, int flags){
+    ZooKeeper(string const& connStr, int recv_timeout,shared_ptr<Watcher> watcher):
+        ZooKeeper(connStr,recv_timeout, watcher, 0){}
 
-            zoo_set_debug_level(ZOO_LOG_LEVEL_ERROR);
-            zk_clientid.client_id=sessionId;
-
-            size_t passwd_len=sizeof(zk_clientid.passwd);
-            //cout<<"passwd_len="<<passwd_len<<endl;
-            //cout<<"passwd_size()"<<passwd.size()<<endl;
-            assert(passwd.size()==passwd_len);
-            std::copy(passwd.begin(),passwd.end(),zk_clientid.passwd);
-            //LOGi("passwd_len=%u",passwd_len);
-            //LOGi("passwd_size()=%u",passwd.size());
-
-            zk_handle = zookeeper_init(connStr.c_str(), watch_process, recv_timeout,
-                    &zk_clientid, NULL, flags);
-            if (!zk_handle){
-                THROW(zerror(errno));
-            }
-            zk_watcher=watcher;
-            zk_watcher->setZooKeeper(this);
-            zoo_set_context(zk_handle,this);
-            LOGi("Succeeded in connecting to ZK specified by %s",connStr.c_str());
+    ~ZooKeeper(){
+        zookeeper_close(zk_handle);
+    }
+    
+    string zk_create(string const& path,string const& data,CreateMode createMode){
+        char path_buff[256]={0};
+        int rc=zoo_create(zk_handle, path.c_str(), data.c_str(), data.size(),
+                &ZOO_OPEN_ACL_UNSAFE, createMode.value(),path_buff,256);
+        if (rc!=ZOK){
+            LOGe("Failed to create znode %s",path.c_str());
+            THROW(zerror(rc));
         }
-
-        ZooKeeper(string const& connStr, int recv_timeout, shared_ptr<Watcher> watcher,
-                int64_t sessionId, string const& passwd):
-            ZooKeeper(connStr,recv_timeout,watcher,sessionId,passwd, 0){}
-
-        ZooKeeper(string const& connStr, int recv_timeout, shared_ptr<Watcher> watcher, int flags):
-            ZooKeeper(connStr,recv_timeout,watcher,0,string(16,'0'), 0){}
-
-        ZooKeeper(string const& connStr, int recv_timeout,shared_ptr<Watcher> watcher):
-            ZooKeeper(connStr,recv_timeout, watcher, 0){}
-
-        ~ZooKeeper(){
-            zookeeper_close(zk_handle);
+        LOGi("Succeeded in create zode %s",path.c_str());
+        return string(path_buff);
+    }
+    
+    void zk_delete(string const& path,int version){
+        int rc=zoo_delete(zk_handle,path.c_str(),version);
+        if (rc!=ZOK){
+            LOGe("Failed to delete znode %s",path.c_str());
+            THROW(zerror(rc));
         }
-        
-        string zk_create(string const& path,string const& data,CreateMode createMode){
-            char path_buff[256]={0};
-            int rc=zoo_create(zk_handle, path.c_str(), data.c_str(), data.size(),
-                    &ZOO_OPEN_ACL_UNSAFE, createMode.value(),path_buff,256);
-            if (rc!=ZOK){
-                LOGe("Failed to create znode %s",path.c_str());
-                THROW(zerror(rc));
-            }
-            LOGi("Succeeded in create zode %s",path.c_str());
-            return string(path_buff);
-        }
-        
-        void zk_delete(string const& path,int version){
-            int rc=zoo_delete(zk_handle,path.c_str(),version);
-            if (rc!=ZOK){
-                LOGe("Failed to delete znode %s",path.c_str());
-                THROW(zerror(rc));
-            }
-            LOGi("Succeeded in delete znode %s",path.c_str());
-        }
+        LOGi("Succeeded in delete znode %s",path.c_str());
+    }
 
-        bool zk_exists(string const& path, bool watch){
-            int rc=zoo_exists(zk_handle, path.c_str(), watch, NULL);
-            if (rc==ZOK){
-                LOGi("Znode %s already exists", path.c_str());
-                return true;
-            }else if (rc==ZNONODE){
-                LOGi("Znode %s no exists yet", path.c_str());
-                return false;
-            }else {
-                LOGe("Failed to invoke zk_exists");
-                THROW(zerror(rc));
-                return false;
-            }
+    bool zk_exists(string const& path, bool watch){
+        int rc=zoo_exists(zk_handle, path.c_str(), watch, NULL);
+        if (rc==ZOK){
+            LOGi("Znode %s already exists", path.c_str());
+            return true;
+        }else if (rc==ZNONODE){
+            LOGi("Znode %s no exists yet", path.c_str());
+            return false;
+        }else {
+            LOGe("Failed to invoke zk_exists");
+            THROW(zerror(rc));
+            return false;
         }
+    }
 
-        string zk_getData(string const& path, bool watch){
-            char buff[256]={0};
-            int bufflen=256;
-            int rc=zoo_get(zk_handle,path.c_str(), watch, buff, &bufflen, NULL);
-            if (rc!=ZOK){
-                LOGe("Failed to get data of znode %s", path.c_str());
-                THROW(zerror(rc));
-            }
-            LOGi("Succeeded in geting data of znode %s", path.c_str());
-            string s(bufflen,'0');
-            std::copy(buff,buff+bufflen,s.begin());
+    string zk_getData(string const& path, bool watch){
+        char buff[256]={0};
+        int bufflen=256;
+        int rc=zoo_get(zk_handle,path.c_str(), watch, buff, &bufflen, NULL);
+        if (rc!=ZOK){
+            LOGe("Failed to get data of znode %s", path.c_str());
+            THROW(zerror(rc));
         }
+        LOGi("Succeeded in geting data of znode %s", path.c_str());
+        string s(bufflen,'0');
+        std::copy(buff,buff+bufflen,s.begin());
+    }
 
-        void zk_setData(string const& path, string const& data, int version){
-            int rc=zoo_set(zk_handle,path.c_str(),data.c_str(),
-                    data.size(),version);
-            if (rc!=ZOK){
-                LOGe("Failed to set data of znode %s",path.c_str());
-                THROW(zerror(rc));
-            }
-            LOGi("Succeeded in setting data of znode %s",path.c_str());
+    void zk_setData(string const& path, string const& data, int version){
+        int rc=zoo_set(zk_handle,path.c_str(),data.c_str(),
+                data.size(),version);
+        if (rc!=ZOK){
+            LOGe("Failed to set data of znode %s",path.c_str());
+            THROW(zerror(rc));
         }
+        LOGi("Succeeded in setting data of znode %s",path.c_str());
+    }
 
-        list<string> zk_getChildren(string const& path,bool watch){
-            struct String_vector strings;
-            int rc=zoo_get_children(zk_handle,path.c_str(),watch,&strings);
-            if (rc!=ZOK) {
-                LOGe("Failed to get children of znode %s",path.c_str());
-                THROW(zerror(rc));
-            }
-            list<string> children;
-            for (int i=0;i<strings.count;++i){
-                children.push_back(strings.data[i]);
-            }
-            deallocate_String_vector(&strings);
-            return children;
+    list<string> zk_getChildren(string const& path,bool watch){
+        struct String_vector strings;
+        int rc=zoo_get_children(zk_handle,path.c_str(),watch,&strings);
+        if (rc!=ZOK) {
+            LOGe("Failed to get children of znode %s",path.c_str());
+            THROW(zerror(rc));
         }
+        list<string> children;
+        for (int i=0;i<strings.count;++i){
+            children.push_back(strings.data[i]);
+        }
+        deallocate_String_vector(&strings);
+        return children;
+    }
 };
 
 static void watch_process(zhandle_t* zh,int type,int state,

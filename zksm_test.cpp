@@ -1,9 +1,17 @@
 #include "ZKServiceMonitor.hpp"
 #include <unistd.h>
 int main(int argc,char **argv){
-    string baseNode="/hbserver";
-    string conStr="localhost:2181";
-    ServiceMonitor zksm(conStr,30000,baseNode);
+
+	if (argc != 3) {
+		cerr << "Usage: zk_test is a demo that show usage of Zookeeper.hpp\n"
+			 << "\tzk_test -help\t\t#print help info.\n"
+			 << "\tzk_test <constr> <znode>\t\t#show usage of APIS:  exists, getChildren, delete, create & etc.\n";
+		return 1;
+	}
+
+	string connstr(argv[1]);
+	string znode(argv[2]);
+    ServiceMonitor zksm(connstr,30000,znode);
     while(true){
         zksm.registered();
         

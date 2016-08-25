@@ -3,9 +3,16 @@
 using namespace org::apache::zookeeper;
 
 int main(int argc,char** argv){
-    string znode(argv[1]);
+	if (argc != 3) {
+		cerr << "Usage: zk_test is a demo that show usage of Zookeeper.hpp\n"
+			 << "\tzk_test -help\t\t#print help info.\n"
+			 << "\tzk_test <constr> <znode>\t\t#show usage of APIS:  exists, getChildren, delete, create & etc.\n";
+		return 1;
+	}
+	string connstr(argv[1]);
+    string znode(argv[2]);
     try {
-        ZooKeeper zk("localhost:2181",30000,shared_ptr<Watcher>(new Watcher()));
+        ZooKeeper zk(connstr, 30000,shared_ptr<Watcher>(new Watcher()));
         if (zk.zk_exists(znode, false)){
             list<string> nodes=zk.zk_getChildren(znode,false);
             if (nodes.empty()){

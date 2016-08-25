@@ -250,6 +250,32 @@ public:
     }
 };
 
+// A RAII wrapper for String_vector struct
+class StringVectorWrapper {
+private:
+	String_vector wrapped;
+	StringVectorWrapper(StringVectorWrapper const&);
+	StringVectorWrapper& operator=(StringVectorWrapper const&);
+public:
+	StringVectorWrapper(){
+		wrapped.count = 0;
+		wrapped.data = NULL;
+	}
+	~StringVectorWrapper(){
+        deallocate_String_vector(&wrapped);
+	}
+	operator struct String_vector*(){
+		return &wrapped;
+	}
+	list<string> operator()(){
+		list<string> slst;
+		for (int i = 0; i < wrapped.count; ++i){
+			slst.push_back(wrapped.data[i]);
+		}
+		return slst;
+	}
+};
+
 class ZooKeeper{
 public:
     void watch_callback(const WatchedEvent& event){
@@ -267,7 +293,7 @@ public:
     typedef long long int64_t;
     typedef void (*watch_fn)(zhandle_t*,int,int,const char*,void*);
 
-    ZooKeeper(string const& connStr,int recv_timeout,
+    ZooKeeper(string const& connStr,int sessionTimeout,
             shared_ptr<Watcher> watcher,int64_t sessionId,
             string const& passwd, int flags){
 
@@ -282,7 +308,7 @@ public:
         //LOGi("passwd_len=%u",passwd_len);
         //LOGi("passwd_size()=%u",passwd.size());
 
-        zk_handle = zookeeper_init(connStr.c_str(), watch_process, recv_timeout,
+        zk_handle = zookeeper_init(connStr.c_str(), watch_process, sessionTimeout,
                 &zk_clientid, NULL, flags);
         if (!zk_handle){
             THROW(zerror(errno));
@@ -293,15 +319,15 @@ public:
         LOGi("Succeeded in connecting to ZK specified by %s",connStr.c_str());
     }
 
-    ZooKeeper(string const& connStr, int recv_timeout, shared_ptr<Watcher> watcher,
+    ZooKeeper(string const& connStr, int sessionTimeout, shared_ptr<Watcher> watcher,
             int64_t sessionId, string const& passwd):
-        ZooKeeper(connStr,recv_timeout,watcher,sessionId,passwd, 0){}
+        ZooKeeper(connStr,sessionTimeout,watcher,sessionId,passwd, 0){}
 
-    ZooKeeper(string const& connStr, int recv_timeout, shared_ptr<Watcher> watcher, int flags):
-        ZooKeeper(connStr,recv_timeout,watcher,0,string(16,'0'), 0){}
+    ZooKeeper(string const& connStr, int sessionTimeout, shared_ptr<Watcher> watcher, int flags):
+        ZooKeeper(connStr,sessionTimeout,watcher,0,string(16,'0'), 0){}
 
-    ZooKeeper(string const& connStr, int recv_timeout,shared_ptr<Watcher> watcher):
-        ZooKeeper(connStr,recv_timeout, watcher, 0){}
+    ZooKeeper(string const& connStr, int sessionTimeout,shared_ptr<Watcher> watcher):
+        ZooKeeper(connStr,sessionTimeout, watcher, 0){}
 
     ~ZooKeeper(){
         zookeeper_close(zk_handle);
@@ -367,18 +393,21 @@ public:
     }
 
     list<string> zk_getChildren(string const& path,bool watch){
-        struct String_vector strings;
-        int rc=zoo_get_children(zk_handle,path.c_str(),watch,&strings);
+		//struct String_vector strings;
+		StringVectorWrapper svw;
+        //int rc=zoo_get_children(zk_handle,path.c_str(),watch,&strings);
+        int rc=zoo_get_children(zk_handle,path.c_str(),watch,svw);
         if (rc!=ZOK) {
             LOGe("Failed to get children of znode %s",path.c_str());
             THROW(zerror(rc));
         }
-        list<string> children;
-        for (int i=0;i<strings.count;++i){
-            children.push_back(strings.data[i]);
-        }
-        deallocate_String_vector(&strings);
-        return children;
+		return svw();
+        //list<string> children;
+        //for (int i=0;i<strings.count;++i){
+        //    children.push_back(strings.data[i]);
+        //}
+        //deallocate_String_vector(&strings);
+        //return children;
     }
 };
 
